@@ -5,11 +5,25 @@ import ServiceManagement
 
 // Floating panel that works over full-screen apps
 final class FloatingPanel: NSPanel {
+    var onDismiss: (() -> Void)?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
     override func cancelOperation(_ sender: Any?) {
-        orderOut(nil)
+        if let onDismiss {
+            onDismiss()
+        } else {
+            orderOut(nil)
+        }
+    }
+
+    override func close() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            super.close()
+        }
     }
 }
 
@@ -49,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let logger = ActivityLogger()
     let settings = AppSettings()
     private var reminderTimer: Timer?
+    private var reminderFocusTask: Task<Void, Never>?
     private var settingsCancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -97,8 +112,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = false
+        panel.onDismiss = { [weak self] in
+            self?.hidePanel()
+        }
         let hostingController = NSHostingController(
-            rootView: MenuBarView(logger: logger, settings: settings)
+            rootView: MenuBarView(
+                logger: logger,
+                settings: settings,
+                dismissPanel: { [weak self] in self?.hidePanel() }
+            )
         )
         hostingController.sizingOptions = []
         panel.contentViewController = hostingController
@@ -216,30 +238,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func togglePanel() {
         if panel.isVisible {
-            panel.orderOut(nil)
+            hidePanel()
         } else {
             showPanel(isReminder: false)
         }
     }
 
     private func showPanel(isReminder: Bool) {
+        reminderFocusTask?.cancel()
+        reminderFocusTask = nil
         logger.loadToday()
         panel.center()
         NotificationCenter.default.post(name: .panelWillShow, object: nil)
 
         if isReminder {
             panel.orderFrontRegardless()
-            Task {
+            reminderFocusTask = Task { @MainActor [weak self] in
+                guard let self else { return }
                 try? await Task.sleep(for: .seconds(0.75))
-                panel.makeKeyAndOrderFront(nil)
+                guard !Task.isCancelled, self.panel.isVisible else { return }
+                self.panel.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
                 NotificationCenter.default.post(name: .panelShowedByReminder, object: nil)
+                self.reminderFocusTask = nil
             }
         } else {
             panel.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             NotificationCenter.default.post(name: .panelShowedManually, object: nil)
         }
+    }
+
+    private func hidePanel() {
+        reminderFocusTask?.cancel()
+        reminderFocusTask = nil
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+        NotificationCenter.default.post(name: .panelDidHide, object: nil)
     }
 }
 

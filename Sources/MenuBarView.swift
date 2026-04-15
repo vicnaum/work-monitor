@@ -3,9 +3,11 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var logger: ActivityLogger
     @ObservedObject var settings: AppSettings
+    let dismissPanel: () -> Void
     @State private var activityText = ""
     @FocusState private var isTextFieldFocused: Bool
     @State private var now = Date()
+    @State private var clockTask: Task<Void, Never>?
     @State private var isAutoOpened = false
     @State private var autoDismissing = false
     @State private var autoDismissProgress: CGFloat = 0
@@ -13,8 +15,6 @@ struct MenuBarView: View {
     @State private var motivationalText: String = Self.randomMotivation()
     @State private var motivationalColor: Color = Self.randomBrightColor()
     @State private var showingCalendar = false
-
-    let clockTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private static let brightColors: [Color] = [
         .orange, .pink, .purple, .mint, .teal, .cyan, .indigo,
@@ -80,7 +80,6 @@ struct MenuBarView: View {
                     Text(now, format: .dateTime.hour().minute())
                         .font(.system(size: 24, weight: .bold, design: .monospaced))
                         .foregroundStyle(.red)
-                        .onReceive(clockTimer) { now = $0 }
 
                     Text("What have you been working on for the last \(timeSinceLastEntry)?")
                         .font(.system(size: 22))
@@ -261,7 +260,7 @@ struct MenuBarView: View {
 
                 Button {
                     cancelAutoDismiss()
-                    NSApp.keyWindow?.orderOut(nil)
+                    dismissPanel()
                 } label: {
                     Text("Dismiss")
                 }
@@ -307,6 +306,7 @@ struct MenuBarView: View {
             motivationalText = Self.randomMotivation()
             motivationalColor = Self.randomBrightColor()
             logger.selectToday()
+            startClock()
         }
         .onReceive(NotificationCenter.default.publisher(for: .panelShowedByReminder)) { _ in
             isAutoOpened = true
@@ -318,6 +318,35 @@ struct MenuBarView: View {
             cancelAutoDismiss()
             isTextFieldFocused = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .panelDidHide)) { _ in
+            isAutoOpened = false
+            cancelAutoDismiss()
+            stopClock()
+        }
+        .onDisappear {
+            cancelAutoDismiss()
+            stopClock()
+        }
+    }
+
+    @MainActor
+    private func startClock() {
+        now = Date()
+        guard clockTask == nil else { return }
+
+        clockTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                now = Date()
+            }
+        }
+    }
+
+    @MainActor
+    private func stopClock() {
+        clockTask?.cancel()
+        clockTask = nil
     }
 
     private func logActivity() {
@@ -344,7 +373,7 @@ struct MenuBarView: View {
             autoDismissing = false
             autoDismissProgress = 0
             isAutoOpened = false
-            NSApp.keyWindow?.orderOut(nil)
+            dismissPanel()
         }
     }
 
@@ -366,34 +395,31 @@ struct CalendarSection: View {
     @ObservedObject var logger: ActivityLogger
     @Binding var showingCalendar: Bool
 
-    private let calendar = Calendar.current
-    private let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    private let calendar = WorkMonitorDates.uiCalendar
     @State private var displayedMonth = Date()
 
     private var datesWithLogsSet: Set<String> {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return Set(logger.datesWithLogs.map { f.string(from: $0) })
+        Set(logger.datesWithLogs.map { WorkMonitorDates.storageDayString(for: $0) })
+    }
+
+    private var weekdays: [String] {
+        WorkMonitorDates.orderedWeekdaySymbols()
     }
 
     private var monthTitle: String {
-        let f = DateFormatter()
-        f.dateFormat = "MMMM yyyy"
-        return f.string(from: displayedMonth)
+        WorkMonitorDates.monthTitle(for: displayedMonth)
     }
 
     private var daysInMonth: [Date?] {
-        let range = calendar.range(of: .day, in: .month, for: displayedMonth)!
-        let firstOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: displayedMonth))!
-        // Monday = 1 in ISO, Sunday = 7
-        var weekday = calendar.component(.weekday, from: firstOfMonth)
-        // Convert to Monday-based: Mon=0, Tue=1, ..., Sun=6
-        weekday = (weekday + 5) % 7
-        let blanks: [Date?] = Array(repeating: nil, count: weekday)
-        let days: [Date?] = range.map { day in
-            calendar.date(bySetting: .day, value: day, of: firstOfMonth)
-        }
-        return blanks + days
+        WorkMonitorDates.daysInMonth(for: displayedMonth)
+    }
+
+    private var displayedMonthStart: Date {
+        WorkMonitorDates.startOfMonth(for: displayedMonth)
+    }
+
+    private var canNavigateForward: Bool {
+        WorkMonitorDates.canNavigateForward(from: displayedMonthStart)
     }
 
     var body: some View {
@@ -401,7 +427,7 @@ struct CalendarSection: View {
             // Month nav
             HStack {
                 Button {
-                    displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth)!
+                    displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonthStart) ?? displayedMonthStart
                 } label: {
                     Image(systemName: "chevron.left")
                 }
@@ -413,17 +439,13 @@ struct CalendarSection: View {
                 Spacer()
 
                 Button {
-                    let next = calendar.date(byAdding: .month, value: 1, to: displayedMonth)!
-                    if next <= Date() { displayedMonth = next }
+                    guard canNavigateForward else { return }
+                    displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonthStart) ?? displayedMonthStart
                 } label: {
                     Image(systemName: "chevron.right")
                 }
                 .buttonStyle(.plain)
-                .disabled({
-                    let next = calendar.date(byAdding: .month, value: 1, to: displayedMonth)!
-                    return calendar.component(.month, from: next) > calendar.component(.month, from: Date())
-                        && calendar.component(.year, from: next) >= calendar.component(.year, from: Date())
-                }())
+                .disabled(!canNavigateForward)
             }
 
             // Weekday headers
@@ -439,14 +461,10 @@ struct CalendarSection: View {
                     if let date {
                         DayCell(
                             date: date,
-                            hasLog: datesWithLogsSet.contains({
-                                let f = DateFormatter()
-                                f.dateFormat = "yyyy-MM-dd"
-                                return f.string(from: date)
-                            }()),
+                            hasLog: datesWithLogsSet.contains(WorkMonitorDates.storageDayString(for: date)),
                             isToday: calendar.isDateInToday(date),
                             isSelected: calendar.isDate(date, inSameDayAs: logger.selectedDate),
-                            isFuture: date > Date()
+                            isFuture: WorkMonitorDates.isFutureDay(date)
                         ) {
                             logger.selectDate(date)
                             showingCalendar = false
@@ -460,7 +478,7 @@ struct CalendarSection: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            displayedMonth = logger.selectedDate
+            displayedMonth = WorkMonitorDates.startOfMonth(for: logger.selectedDate)
             logger.scanForDates()
         }
     }
@@ -480,7 +498,7 @@ struct DayCell: View {
 
     var body: some View {
         Button(action: action) {
-            Text("\(Calendar.current.component(.day, from: date))")
+            Text("\(WorkMonitorDates.uiCalendar.component(.day, from: date))")
                 .font(.system(size: 14, weight: isToday || hasLog ? .bold : .regular))
                 .foregroundStyle(
                     isFuture ? Color.secondary.opacity(0.3) :
@@ -705,4 +723,5 @@ extension Notification.Name {
     static let panelWillShow = Notification.Name("WorkMonitor.panelWillShow")
     static let panelShowedByReminder = Notification.Name("WorkMonitor.panelShowedByReminder")
     static let panelShowedManually = Notification.Name("WorkMonitor.panelShowedManually")
+    static let panelDidHide = Notification.Name("WorkMonitor.panelDidHide")
 }
