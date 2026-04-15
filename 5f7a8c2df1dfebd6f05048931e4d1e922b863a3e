@@ -1,0 +1,29 @@
+Sources/WorkMonitorDates.swift
+  7a7a0b37cde3804f 1-118
+Sources/MenuBarView.swift
+  7a7a0b37cde3804f 6,10,263,309,321-328,330-349,376,398,402,405-406,410,414-422,430,442-443,448,464,467,481,501,726
+Sources/ActivityLogger.swift
+  7a7a0b37cde3804f 25,33,41-42,45-47,50-54,94,100,106,122-123,130-134,143-153,157,159,162-165,168
+Sources/AppDelegate.swift
+  7a7a0b37cde3804f 8-9,14-26,66,115-117,119-123,241,248-249,256-257,259-260,263,271-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "5f7a8c2df1dfebd6f05048931e4d1e922b863a3e",
+  "prompts": {
+    "7a7a0b37cde3804f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fa740bd6-b9a7-40cc-af4c-084bd55a7e25",
+        "model": "gpt-5.4-xhigh"
+      },
+      "human_author": "vicnaum",
+      "messages": [],
+      "total_additions": 260,
+      "total_deletions": 87,
+      "accepted_lines": 257,
+      "overriden_lines": 0
+    }
+  }
+}
