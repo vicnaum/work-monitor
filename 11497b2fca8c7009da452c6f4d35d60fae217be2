@@ -1,0 +1,41 @@
+Sources/MenuBarView.swift
+  7f83aac34ceb0762 1-708
+LICENSE
+  7f83aac34ceb0762 1-21
+scripts/generate-icon.swift
+  7f83aac34ceb0762 1-108
+README.md
+  7f83aac34ceb0762 1-59
+Info.plist
+  7f83aac34ceb0762 1-27
+Sources/ActivityLogger.swift
+  7f83aac34ceb0762 1-169
+build.sh
+  7f83aac34ceb0762 1-61
+.gitignore
+  7f83aac34ceb0762 1-6
+Sources/main.swift
+  7f83aac34ceb0762 1-13
+Sources/AppDelegate.swift
+  7f83aac34ceb0762 1-245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "11497b2fca8c7009da452c6f4d35d60fae217be2",
+  "prompts": {
+    "7f83aac34ceb0762": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d363d6c-fbb0-4509-aaf9-9a2747aa7560",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "vicnaum",
+      "messages": [],
+      "total_additions": 1417,
+      "total_deletions": 0,
+      "accepted_lines": 1417,
+      "overriden_lines": 0
+    }
+  }
+}
