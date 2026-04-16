@@ -23,14 +23,28 @@ jobs:
       - name: Build app (arm64)
         run: BUILD_ARCH=arm64 ./build.sh
 
-      - name: Prepare release artifact
+      - name: Stamp version
         run: |
           cd WorkMonitor.app/Contents
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ inputs.version }}" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ inputs.version }}" Info.plist
           cd ../..
           codesign --force --sign - WorkMonitor.app
-          ditto -c -k --keepParent WorkMonitor.app WorkMonitor.app.zip
+
+      - name: Create DMG
+        run: |
+          DMG_DIR="dmg-staging"
+          mkdir -p "$DMG_DIR"
+          cp -r WorkMonitor.app "$DMG_DIR/"
+          ln -s /Applications "$DMG_DIR/Applications"
+          hdiutil create -volname "Work Monitor" \
+            -srcfolder "$DMG_DIR" \
+            -ov -format UDZO \
+            WorkMonitor.dmg
+          rm -rf "$DMG_DIR"
+
+      - name: Create zip
+        run: ditto -c -k --keepParent WorkMonitor.app WorkMonitor.app.zip
 
       - name: Create GitHub Release
         env:
@@ -39,4 +53,5 @@ jobs:
           gh release create "${{ inputs.version }}" \
             --title "Work Monitor ${{ inputs.version }}" \
             --generate-notes \
+            WorkMonitor.dmg \
             WorkMonitor.app.zip
