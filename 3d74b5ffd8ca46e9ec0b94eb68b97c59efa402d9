@@ -1,0 +1,23 @@
+.github/workflows/release.yml
+  7f83aac34ceb0762 26,33-47,56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "3d74b5ffd8ca46e9ec0b94eb68b97c59efa402d9",
+  "prompts": {
+    "7f83aac34ceb0762": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d363d6c-fbb0-4509-aaf9-9a2747aa7560",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "vicnaum",
+      "messages": [],
+      "total_additions": 17,
+      "total_deletions": 2,
+      "accepted_lines": 959,
+      "overriden_lines": 0
+    }
+  }
+}
