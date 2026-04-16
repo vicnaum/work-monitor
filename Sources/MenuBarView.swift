@@ -173,8 +173,20 @@ struct MenuBarView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            // Error warning
+            if let error = logger.lastError {
+                ErrorBanner(error: error) {
+                    logger.dismissError()
+                }
+            }
+
             // Calendar or entries (same space)
-            if showingCalendar {
+            if logger.isLoading {
+                Spacer()
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Spacer()
+            } else if showingCalendar {
                 CalendarSection(logger: logger, showingCalendar: $showingCalendar)
             } else if displayedEntries.isEmpty {
                 Spacer()
@@ -619,6 +631,75 @@ struct DayCell: View {
 }
 
 // MARK: - Entry Row
+
+// MARK: - Error Banner
+
+struct ErrorBanner: View {
+    let error: StoreError
+    let onDismiss: () -> Void
+    @State private var showingDetails = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                Text("Save error")
+                    .font(.caption.bold())
+                    .foregroundStyle(.primary)
+                Spacer()
+                Button {
+                    showingDetails.toggle()
+                } label: {
+                    Text(showingDetails ? "Hide details" : "Details")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showingDetails {
+                Text(error.localizedDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                if let suggestion = error.recoverySuggestion {
+                    Text(suggestion)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    let text = "**Error:** \(error.localizedDescription)\n**macOS:** \(ProcessInfo.processInfo.operatingSystemVersionString)"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Label("Copy for Issue", systemImage: "doc.on.clipboard")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.yellow.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.yellow.opacity(0.3))
+                )
+        )
+    }
+}
 
 struct EntryRow: View {
     let entry: LogEntry

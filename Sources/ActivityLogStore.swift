@@ -1,5 +1,24 @@
 import Foundation
 
+enum StoreError: LocalizedError, Sendable {
+    case saveFailed(String)
+    case directoryCreateFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .saveFailed(let detail): return "Failed to save log: \(detail)"
+        case .directoryCreateFailed(let detail): return "Failed to create log directory: \(detail)"
+        }
+    }
+
+    var recoverySuggestion: String? {
+        switch self {
+        case .saveFailed: return "Check disk space and folder permissions for the log directory."
+        case .directoryCreateFailed: return "Check that the parent folder exists and is writable."
+        }
+    }
+}
+
 actor ActivityLogStore {
     private var logDirectory: URL
 
@@ -7,16 +26,20 @@ actor ActivityLogStore {
         self.logDirectory = logDirectory.standardizedFileURL
     }
 
-    func ensureLogDirectoryExists() {
-        try? FileManager.default.createDirectory(
-            at: logDirectory,
-            withIntermediateDirectories: true
-        )
+    func ensureLogDirectoryExists() throws {
+        do {
+            try FileManager.default.createDirectory(
+                at: logDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw StoreError.directoryCreateFailed(error.localizedDescription)
+        }
     }
 
-    func setLogDirectory(_ url: URL) {
+    func setLogDirectory(_ url: URL) throws {
         logDirectory = url.standardizedFileURL
-        ensureLogDirectoryExists()
+        try ensureLogDirectoryExists()
     }
 
     func hasStoredLogs() -> Bool {
@@ -46,7 +69,7 @@ actor ActivityLogStore {
         }
 
         logDirectory = destinationDirectory
-        ensureLogDirectoryExists()
+        try ensureLogDirectoryExists()
         return destinationDirectory
     }
 
@@ -60,28 +83,29 @@ actor ActivityLogStore {
         return entries.sorted { $0.timestamp > $1.timestamp }
     }
 
-    func save(entries: [LogEntry], for date: Date) {
-        ensureLogDirectoryExists()
+    func save(entries: [LogEntry], for date: Date) throws {
+        try ensureLogDirectoryExists()
 
         let jsonURL = entriesFileURL(for: date)
         let markdownURL = markdownFileURL(for: date)
         let sortedEntries = entries.sorted { $0.timestamp < $1.timestamp }
 
         if sortedEntries.isEmpty {
-            if FileManager.default.fileExists(atPath: jsonURL.path) {
-                try? FileManager.default.removeItem(at: jsonURL)
-            }
-            if FileManager.default.fileExists(atPath: markdownURL.path) {
-                try? FileManager.default.removeItem(at: markdownURL)
-            }
+            try? FileManager.default.removeItem(at: jsonURL)
+            try? FileManager.default.removeItem(at: markdownURL)
             return
         }
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(sortedEntries) else { return }
-        try? data.write(to: jsonURL, options: .atomic)
+
+        do {
+            let data = try encoder.encode(sortedEntries)
+            try data.write(to: jsonURL, options: .atomic)
+        } catch {
+            throw StoreError.saveFailed(error.localizedDescription)
+        }
         saveMarkdown(entries: sortedEntries, to: markdownURL, date: date)
     }
 

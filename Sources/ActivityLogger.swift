@@ -35,6 +35,8 @@ final class ActivityLogger: ObservableObject {
     @Published var historicalEntries: [LogEntry] = []
     @Published var datesWithLogs: [Date] = []
     @Published private(set) var logDirectory: URL
+    @Published var isLoading = false
+    @Published var lastError: StoreError?
     let appLaunchTime = Date()
     private let persistsLogDirectory: Bool
     private let userDefaults: UserDefaults
@@ -78,7 +80,9 @@ final class ActivityLogger: ObservableObject {
     }
 
     func loadToday() async {
-        todayEntries = await store.loadEntries(for: Date())
+        await withLoadingIndicator {
+            todayEntries = await store.loadEntries(for: Date())
+        }
     }
 
     func hasStoredLogs() async -> Bool {
@@ -87,7 +91,11 @@ final class ActivityLogger: ObservableObject {
 
     func setLogDirectory(_ url: URL) async {
         let newDirectory = url.standardizedFileURL
-        await store.setLogDirectory(newDirectory)
+        do {
+            try await store.setLogDirectory(newDirectory)
+        } catch {
+            surfaceError(error)
+        }
         logDirectory = newDirectory
         if persistsLogDirectory {
             WorkMonitorPaths.setStoredLogDirectory(newDirectory, userDefaults: userDefaults)
@@ -107,7 +115,9 @@ final class ActivityLogger: ObservableObject {
     func selectDate(_ date: Date) async {
         selectedDate = date
         if !isViewingToday {
-            historicalEntries = await store.loadEntries(for: date)
+            await withLoadingIndicator {
+                historicalEntries = await store.loadEntries(for: date)
+            }
         }
     }
 
@@ -121,7 +131,10 @@ final class ActivityLogger: ObservableObject {
             await persistTodayEntries()
             datesWithLogs = await store.storedLogDates()
         }
-        // Don't allow deleting historical entries
+    }
+
+    func dismissError() {
+        lastError = nil
     }
 
     func slackFormatted(date: Date, entries: [LogEntry], showTimestamps: Bool) -> String {
@@ -145,22 +158,50 @@ final class ActivityLogger: ObservableObject {
     // MARK: - Private
 
     private func prepareInitialState() async {
-        await store.ensureLogDirectoryExists()
+        do {
+            try await store.ensureLogDirectoryExists()
+        } catch {
+            surfaceError(error)
+        }
         await reloadEntriesForCurrentDirectory()
     }
 
     private func reloadEntriesForCurrentDirectory() async {
-        todayEntries = await store.loadEntries(for: Date())
-        if isViewingToday {
-            historicalEntries = []
-        } else {
-            historicalEntries = await store.loadEntries(for: selectedDate)
+        await withLoadingIndicator {
+            todayEntries = await store.loadEntries(for: Date())
+            if isViewingToday {
+                historicalEntries = []
+            } else {
+                historicalEntries = await store.loadEntries(for: selectedDate)
+            }
+            datesWithLogs = await store.storedLogDates()
         }
-        datesWithLogs = await store.storedLogDates()
     }
 
     private func persistTodayEntries() async {
-        // Capture once to avoid day-boundary drift between persistence operations.
-        await store.save(entries: todayEntries, for: Date())
+        do {
+            try await store.save(entries: todayEntries, for: Date())
+        } catch {
+            surfaceError(error)
+        }
+    }
+
+    private func surfaceError(_ error: Error) {
+        if let storeError = error as? StoreError {
+            lastError = storeError
+        } else {
+            lastError = .saveFailed(error.localizedDescription)
+        }
+    }
+
+    private func withLoadingIndicator(_ operation: () async -> Void) async {
+        let showLoaderTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            isLoading = true
+        }
+        await operation()
+        showLoaderTask.cancel()
+        isLoading = false
     }
 }
