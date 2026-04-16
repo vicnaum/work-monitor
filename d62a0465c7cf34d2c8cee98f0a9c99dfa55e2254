@@ -1,0 +1,48 @@
+Tests/WorkMonitorPathsTests.swift
+  7a7a0b37cde3804f 1-55
+Tests/ActivityLoggerTests.swift
+  7a7a0b37cde3804f 58-76
+Sources/WorkMonitorPaths.swift
+  7a7a0b37cde3804f 1-45
+README.md
+  7a7a0b37cde3804f 35-40,56,64,68,70
+Sources/MenuBarView.swift
+  7a7a0b37cde3804f 69-76,225,231-236,399-413,605-634,636-651
+build.sh
+  7a7a0b37cde3804f 10,12-15,43,46,55,68
+Sources/ActivityLogger.swift
+  7a7a0b37cde3804f 22,24-25,47-55,77-83,136-144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "d62a0465c7cf34d2c8cee98f0a9c99dfa55e2254",
+  "prompts": {
+    "7a7a0b37cde3804f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fa740bd6-b9a7-40cc-af4c-084bd55a7e25",
+        "model": "gpt-5.4-xhigh"
+      },
+      "human_author": "vicnaum",
+      "messages": [],
+      "total_additions": 252,
+      "total_deletions": 26,
+      "accepted_lines": 251,
+      "overriden_lines": 0
+    },
+    "7f83aac34ceb0762": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d363d6c-fbb0-4509-aaf9-9a2747aa7560",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "vicnaum",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 9,
+      "overriden_lines": 4
+    }
+  }
+}
