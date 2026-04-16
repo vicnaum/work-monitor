@@ -76,31 +76,45 @@ final class ActivityLogger: ObservableObject {
         let entry = LogEntry(activity: activity)
         todayEntries.insert(entry, at: 0)
         await persistTodayEntries()
-        datesWithLogs = await store.storedLogDates()
+        do {
+            datesWithLogs = try await store.storedLogDates()
+        } catch {
+            surfaceError(error)
+        }
     }
 
     func loadToday() async {
         await withLoadingIndicator {
-            todayEntries = await store.loadEntries(for: Date())
+            do {
+                todayEntries = try await store.loadEntries(for: Date())
+            } catch {
+                todayEntries = []
+                surfaceError(error)
+            }
         }
     }
 
     func hasStoredLogs() async -> Bool {
-        await store.hasStoredLogs()
+        do {
+            return try await store.hasStoredLogs()
+        } catch {
+            surfaceError(error)
+            return false
+        }
     }
 
     func setLogDirectory(_ url: URL) async {
         let newDirectory = url.standardizedFileURL
         do {
             try await store.setLogDirectory(newDirectory)
+            logDirectory = newDirectory
+            if persistsLogDirectory {
+                WorkMonitorPaths.setStoredLogDirectory(newDirectory, userDefaults: userDefaults)
+            }
+            await reloadEntriesForCurrentDirectory()
         } catch {
             surfaceError(error)
         }
-        logDirectory = newDirectory
-        if persistsLogDirectory {
-            WorkMonitorPaths.setStoredLogDirectory(newDirectory, userDefaults: userDefaults)
-        }
-        await reloadEntriesForCurrentDirectory()
     }
 
     func moveLogs(to url: URL) async throws {
@@ -116,7 +130,12 @@ final class ActivityLogger: ObservableObject {
         selectedDate = date
         if !isViewingToday {
             await withLoadingIndicator {
-                historicalEntries = await store.loadEntries(for: date)
+                do {
+                    historicalEntries = try await store.loadEntries(for: date)
+                } catch {
+                    historicalEntries = []
+                    surfaceError(error)
+                }
             }
         }
     }
@@ -129,7 +148,11 @@ final class ActivityLogger: ObservableObject {
         if isViewingToday {
             todayEntries.removeAll { $0.id == entry.id }
             await persistTodayEntries()
-            datesWithLogs = await store.storedLogDates()
+            do {
+                datesWithLogs = try await store.storedLogDates()
+            } catch {
+                surfaceError(error)
+            }
         }
     }
 
@@ -152,7 +175,11 @@ final class ActivityLogger: ObservableObject {
     }
 
     func scanForDates() async {
-        datesWithLogs = await store.storedLogDates()
+        do {
+            datesWithLogs = try await store.storedLogDates()
+        } catch {
+            surfaceError(error)
+        }
     }
 
     // MARK: - Private
@@ -168,13 +195,22 @@ final class ActivityLogger: ObservableObject {
 
     private func reloadEntriesForCurrentDirectory() async {
         await withLoadingIndicator {
-            todayEntries = await store.loadEntries(for: Date())
-            if isViewingToday {
-                historicalEntries = []
-            } else {
-                historicalEntries = await store.loadEntries(for: selectedDate)
+            do {
+                todayEntries = try await store.loadEntries(for: Date())
+                if isViewingToday {
+                    historicalEntries = []
+                } else {
+                    historicalEntries = try await store.loadEntries(for: selectedDate)
+                }
+                datesWithLogs = try await store.storedLogDates()
+            } catch {
+                if isViewingToday {
+                    todayEntries = []
+                } else {
+                    historicalEntries = []
+                }
+                surfaceError(error)
             }
-            datesWithLogs = await store.storedLogDates()
         }
     }
 
@@ -190,7 +226,7 @@ final class ActivityLogger: ObservableObject {
         if let storeError = error as? StoreError {
             lastError = storeError
         } else {
-            lastError = .saveFailed(error.localizedDescription)
+            lastError = .saveFailed(filename: "log", detail: error.localizedDescription)
         }
     }
 
