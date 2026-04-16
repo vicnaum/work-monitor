@@ -19,7 +19,10 @@ final class ActivityLogger: ObservableObject {
     @Published var selectedDate = Date()
     @Published var historicalEntries: [LogEntry] = []
     @Published var datesWithLogs: [Date] = []
+    @Published private(set) var logDirectory: URL
     let appLaunchTime = Date()
+    private let persistsLogDirectory: Bool
+    private let userDefaults: UserDefaults
 
     var isViewingToday: Bool {
         WorkMonitorDates.uiCalendar.isDateInToday(selectedDate)
@@ -33,8 +36,6 @@ final class ActivityLogger: ObservableObject {
         WorkMonitorDates.mediumDateString(for: selectedDate)
     }
 
-    let logDirectory: URL
-
     private func entriesFileURL(for date: Date) -> URL {
         logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".json")
     }
@@ -43,18 +44,15 @@ final class ActivityLogger: ObservableObject {
         logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".md")
     }
 
-    private var todayFileURL: URL {
-        entriesFileURL(for: Date())
-    }
-
-    private var todayMarkdownURL: URL {
-        markdownFileURL(for: Date())
-    }
-
-    init(logDirectory: URL? = nil) {
-        self.logDirectory = logDirectory
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".work-monitor/logs")
+    init(logDirectory: URL? = nil, userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        if let logDirectory {
+            self.logDirectory = logDirectory.standardizedFileURL
+            self.persistsLogDirectory = false
+        } else {
+            self.logDirectory = WorkMonitorPaths.resolvedLogDirectory(userDefaults: userDefaults)
+            self.persistsLogDirectory = true
+        }
         ensureDirectoryExists()
         loadToday()
         scanForDates()
@@ -74,6 +72,15 @@ final class ActivityLogger: ObservableObject {
 
     func loadToday() {
         todayEntries = loadEntries(for: Date())
+    }
+
+    func setLogDirectory(_ url: URL) {
+        logDirectory = url.standardizedFileURL
+        if persistsLogDirectory {
+            WorkMonitorPaths.setStoredLogDirectory(logDirectory, userDefaults: userDefaults)
+        }
+        ensureDirectoryExists()
+        reloadEntriesForCurrentDirectory()
     }
 
     func selectDate(_ date: Date) {
@@ -125,6 +132,16 @@ final class ActivityLogger: ObservableObject {
     }
 
     // MARK: - Private
+
+    private func reloadEntriesForCurrentDirectory() {
+        todayEntries = loadEntries(for: Date())
+        if isViewingToday {
+            historicalEntries = []
+        } else {
+            historicalEntries = loadEntries(for: selectedDate)
+        }
+        scanForDates()
+    }
 
     private func loadEntries(for date: Date) -> [LogEntry] {
         let fileURL = entriesFileURL(for: date)

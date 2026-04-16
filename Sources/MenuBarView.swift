@@ -66,6 +66,14 @@ struct MenuBarView: View {
         logger.displayedEntries
     }
 
+    private var logDirectoryDisplayPath: String {
+        WorkMonitorPaths.displayPath(for: logger.logDirectory)
+    }
+
+    private var logDirectoryTooltip: String {
+        "Change log folder\nCurrent: \(logger.logDirectory.path)"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Motivational text (only when viewing today)
@@ -214,17 +222,18 @@ struct MenuBarView: View {
                 .disabled(displayedEntries.isEmpty)
 
                 Button {
-                    let logDir = FileManager.default.homeDirectoryForCurrentUser
-                        .appendingPathComponent(".work-monitor/logs")
-                    NSWorkspace.shared.open(logDir)
+                    NSWorkspace.shared.open(logger.logDirectory)
                 } label: {
                     Label("Open Logs", systemImage: "folder")
                 }
                 .buttonStyle(.bordered)
 
-                Text("~/.work-monitor/logs/")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                LogDirectoryLinkButton(
+                    path: logDirectoryDisplayPath,
+                    tooltip: logDirectoryTooltip
+                ) {
+                    chooseLogDirectory()
+                }
 
                 Spacer()
 
@@ -386,6 +395,21 @@ struct MenuBarView: View {
                 autoDismissProgress = 0
             }
         }
+    }
+
+    private func chooseLogDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Log Folder"
+        panel.message = "Choose where Work Monitor stores your daily log files."
+        panel.prompt = "Choose Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = logger.logDirectory
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        logger.setLogDirectory(url)
     }
 }
 
@@ -575,6 +599,56 @@ struct EntryRow: View {
                 .fill(isHovered ? Color.primary.opacity(0.05) : Color.clear)
         )
         .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Log Directory Link
+
+struct LogDirectoryLinkButton: View {
+    let path: String
+    let tooltip: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    private var linkColor: Color {
+        let baseColor = Color(nsColor: .linkColor)
+        return isHovered ? baseColor.opacity(0.75) : baseColor
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(path)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(linkColor)
+                .padding(.bottom, 2)
+                .overlay(alignment: .bottom) {
+                    DottedUnderline(color: linkColor)
+                        .offset(y: 1)
+                }
+                .frame(maxWidth: 230, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .help(tooltip)
+        .onHover { isHovered = $0 }
+    }
+}
+
+private struct DottedUnderline: View {
+    let color: Color
+
+    var body: some View {
+        GeometryReader { proxy in
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: 0.5))
+                path.addLine(to: CGPoint(x: proxy.size.width, y: 0.5))
+            }
+            .stroke(color, style: StrokeStyle(lineWidth: 1, dash: [1, 2]))
+        }
+        .frame(height: 1)
+        .allowsHitTesting(false)
     }
 }
 

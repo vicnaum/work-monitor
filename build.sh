@@ -7,6 +7,12 @@ cd "$SCRIPT_DIR"
 APP_NAME="WorkMonitor.app"
 BUNDLE_DIR="$APP_NAME/Contents"
 BINARY="WorkMonitor"
+INFO_PLIST="Info.plist"
+
+DEFAULT_DEPLOYMENT_TARGET=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$INFO_PLIST" 2>/dev/null || echo "14.0")
+BUILD_ARCH="${BUILD_ARCH:-$(uname -m)}"
+MACOS_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-$DEFAULT_DEPLOYMENT_TARGET}"
+TARGET_TRIPLE="${BUILD_ARCH}-apple-macosx${MACOS_DEPLOYMENT_TARGET}"
 
 echo "Building Work Monitor..."
 
@@ -34,10 +40,10 @@ iconutil -c icns "$ICONSET" -o AppIcon.icns
 rm -rf "$ICONSET" icon_1024.png
 
 # Compile
-echo "Compiling..."
+echo "Compiling for $TARGET_TRIPLE..."
 swiftc \
     -parse-as-library \
-    -target arm64-apple-macosx14.0 \
+    -target "$TARGET_TRIPLE" \
     -O \
     -o "$BINARY" \
     Sources/*.swift
@@ -46,7 +52,7 @@ swiftc \
 mkdir -p "$BUNDLE_DIR/MacOS"
 mkdir -p "$BUNDLE_DIR/Resources"
 mv "$BINARY" "$BUNDLE_DIR/MacOS/"
-cp Info.plist "$BUNDLE_DIR/"
+cp "$INFO_PLIST" "$BUNDLE_DIR/"
 mv AppIcon.icns "$BUNDLE_DIR/Resources/"
 
 # Ad-hoc code sign
@@ -59,3 +65,4 @@ echo "To run:     open $SCRIPT_DIR/$APP_NAME"
 echo "To install: cp -r $APP_NAME /Applications/"
 echo ""
 echo "To launch at login: right-click the menu bar icon > Launch at Login"
+echo "To override target: BUILD_ARCH=x86_64 MACOS_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET ./build.sh"

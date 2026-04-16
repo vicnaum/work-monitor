@@ -32,6 +32,12 @@ cd work-monitor
 cp -r WorkMonitor.app /Applications/
 ```
 
+Optional build overrides:
+
+```bash
+BUILD_ARCH=x86_64 MACOS_DEPLOYMENT_TARGET=14.0 ./build.sh
+```
+
 ### Download binary
 
 Download the latest `WorkMonitor.app.zip` from [Releases](https://github.com/vicnaum/work-monitor/releases).
@@ -47,6 +53,7 @@ Since the app is not notarized, macOS will show a warning on first launch. To by
 - **Enter** -- submit log entry
 - **Escape** -- dismiss the panel
 - Bottom bar icons: toggle timestamps, sound, reminders, adjust interval
+- Click the dotted path link at the bottom to choose a different log folder
 
 ## Tests
 
@@ -54,11 +61,13 @@ Since the app is not notarized, macOS will show a warning on first launch. To by
 swift test
 ```
 
-35 tests covering date formatting, calendar math, entry persistence, deletion cleanup, Slack formatting, and date navigation.
+Targeted tests cover date formatting, calendar math, entry persistence, deletion cleanup, log directory switching, Slack formatting, and date navigation.
 
 ## Logs
 
-Stored in `~/.work-monitor/logs/` as daily files:
+By default logs are stored in `~/Documents/Work Monitor/`, and you can change the folder from the app by clicking the dotted path link at the bottom of the panel.
+
+Daily files are written as:
 - `2026-04-15.json` -- machine-readable (used by the app)
 - `2026-04-15.md` -- human-readable markdown
 

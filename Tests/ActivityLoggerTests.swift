@@ -55,6 +55,25 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertEqual(logger2.todayEntries.count, 2)
     }
 
+    func testSetLogDirectoryReloadsEntriesFromNewFolder() throws {
+        logger.log(activity: "Original folder")
+
+        let otherDir = testDir.appendingPathComponent("Other")
+        try FileManager.default.createDirectory(at: otherDir, withIntermediateDirectories: true)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode([LogEntry(activity: "New folder")])
+        let dayString = WorkMonitorDates.storageDayString(for: Date())
+        try data.write(to: otherDir.appendingPathComponent("\(dayString).json"))
+
+        logger.setLogDirectory(otherDir)
+
+        XCTAssertEqual(logger.logDirectory, otherDir.standardizedFileURL)
+        XCTAssertEqual(logger.todayEntries.count, 1)
+        XCTAssertEqual(logger.todayEntries.first?.activity, "New folder")
+    }
+
     // MARK: - Deletion
 
     func testDeleteEntry() {
