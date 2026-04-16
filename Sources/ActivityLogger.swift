@@ -22,7 +22,7 @@ final class ActivityLogger: ObservableObject {
     let appLaunchTime = Date()
 
     var isViewingToday: Bool {
-        Calendar.current.isDateInToday(selectedDate)
+        WorkMonitorDates.uiCalendar.isDateInToday(selectedDate)
     }
 
     var displayedEntries: [LogEntry] {
@@ -30,29 +30,31 @@ final class ActivityLogger: ObservableObject {
     }
 
     var selectedDateFormatted: String {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        return f.string(from: selectedDate)
+        WorkMonitorDates.mediumDateString(for: selectedDate)
     }
 
-    private var logDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".work-monitor/logs")
+    let logDirectory: URL
+
+    private func entriesFileURL(for date: Date) -> URL {
+        logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".json")
     }
 
-    private func dateString(for date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
+    private func markdownFileURL(for date: Date) -> URL {
+        logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".md")
     }
-
-    private var todayDateString: String { dateString(for: Date()) }
 
     private var todayFileURL: URL {
-        logDirectory.appendingPathComponent(todayDateString + ".json")
+        entriesFileURL(for: Date())
     }
 
-    init() {
+    private var todayMarkdownURL: URL {
+        markdownFileURL(for: Date())
+    }
+
+    init(logDirectory: URL? = nil) {
+        self.logDirectory = logDirectory
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".work-monitor/logs")
         ensureDirectoryExists()
         loadToday()
         scanForDates()
@@ -89,24 +91,19 @@ final class ActivityLogger: ObservableObject {
         if isViewingToday {
             todayEntries.removeAll { $0.id == entry.id }
             save()
+            scanForDates()
         }
         // Don't allow deleting historical entries
     }
 
     func slackFormatted(date: Date, entries: [LogEntry], showTimestamps: Bool) -> String {
-        let dateFmt = DateFormatter()
-        dateFmt.dateStyle = .medium
-
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "HH:mm"
-
-        let header = "*Daily Update — \(dateFmt.string(from: date))*"
+        let header = "*Daily Update — \(WorkMonitorDates.mediumDateString(for: date))*"
         let sorted = entries.sorted { $0.timestamp < $1.timestamp }
         if sorted.isEmpty { return header + "\nNo entries yet." }
 
         let lines: [String]
         if showTimestamps {
-            lines = sorted.map { "• \(timeFmt.string(from: $0.timestamp)) — \($0.activity)" }
+            lines = sorted.map { "• \(WorkMonitorDates.timeString(for: $0.timestamp)) — \($0.activity)" }
         } else {
             lines = sorted.map { "• \($0.activity)" }
         }
@@ -120,18 +117,21 @@ final class ActivityLogger: ObservableObject {
             datesWithLogs = []
             return
         }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
         datesWithLogs = files
             .filter { $0.pathExtension == "json" }
-            .compactMap { f.date(from: $0.deletingPathExtension().lastPathComponent) }
+            .filter { (try? Data(contentsOf: $0))?.count ?? 0 > 4 } // skip empty "[]" files
+            .compactMap { WorkMonitorDates.date(fromStorageDayString: $0.deletingPathExtension().lastPathComponent) }
             .sorted(by: >)
     }
 
     // MARK: - Private
 
     private func loadEntries(for date: Date) -> [LogEntry] {
-        let fileURL = logDirectory.appendingPathComponent(dateString(for: date) + ".json")
+        let fileURL = entriesFileURL(for: date)
+        return loadEntries(from: fileURL)
+    }
+
+    private func loadEntries(from fileURL: URL) -> [LogEntry] {
         guard let data = try? Data(contentsOf: fileURL) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -140,30 +140,36 @@ final class ActivityLogger: ObservableObject {
     }
 
     private func save() {
+        // Capture now once to avoid midnight boundary issues between file writes
+        let now = Date()
+        let jsonURL = entriesFileURL(for: now)
+        let mdURL = markdownFileURL(for: now)
+
+        let sortedEntries = todayEntries.sorted { $0.timestamp < $1.timestamp }
+        if sortedEntries.isEmpty {
+            if FileManager.default.fileExists(atPath: jsonURL.path) {
+                try? FileManager.default.removeItem(at: jsonURL)
+            }
+            if FileManager.default.fileExists(atPath: mdURL.path) {
+                try? FileManager.default.removeItem(at: mdURL)
+            }
+            return
+        }
+
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(
-            todayEntries.sorted { $0.timestamp < $1.timestamp }
-        ) else { return }
-        try? data.write(to: todayFileURL, options: .atomic)
-        saveMarkdown()
+        guard let data = try? encoder.encode(sortedEntries) else { return }
+        try? data.write(to: jsonURL, options: .atomic)
+        saveMarkdown(entries: sortedEntries, to: mdURL, date: now)
     }
 
-    private func saveMarkdown() {
-        let dateFmt = DateFormatter()
-        dateFmt.dateStyle = .full
-
-        let timeFmt = DateFormatter()
-        timeFmt.dateFormat = "HH:mm"
-
-        var md = "# Work Log — \(dateFmt.string(from: Date()))\n\n"
-        let sorted = todayEntries.sorted { $0.timestamp < $1.timestamp }
-        for entry in sorted {
-            md += "- **\(timeFmt.string(from: entry.timestamp))** — \(entry.activity)\n"
+    private func saveMarkdown(entries: [LogEntry], to url: URL, date: Date) {
+        var md = "# Work Log — \(WorkMonitorDates.fullDateString(for: date))\n\n"
+        for entry in entries {
+            md += "- **\(WorkMonitorDates.timeString(for: entry.timestamp))** — \(entry.activity)\n"
         }
 
-        let mdURL = logDirectory.appendingPathComponent(todayDateString + ".md")
-        try? md.write(to: mdURL, atomically: true, encoding: .utf8)
+        try? md.write(to: url, atomically: true, encoding: .utf8)
     }
 }
