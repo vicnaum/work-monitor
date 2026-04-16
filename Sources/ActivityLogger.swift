@@ -35,9 +35,12 @@ final class ActivityLogger: ObservableObject {
     @Published var historicalEntries: [LogEntry] = []
     @Published var datesWithLogs: [Date] = []
     @Published private(set) var logDirectory: URL
+    @Published var isLoading = false
+    @Published var lastError: StoreError?
     let appLaunchTime = Date()
     private let persistsLogDirectory: Bool
     private let userDefaults: UserDefaults
+    private let store: ActivityLogStore
 
     var isViewingToday: Bool {
         WorkMonitorDates.uiCalendar.isDateInToday(selectedDate)
@@ -51,86 +54,70 @@ final class ActivityLogger: ObservableObject {
         WorkMonitorDates.mediumDateString(for: selectedDate)
     }
 
-    private func entriesFileURL(for date: Date) -> URL {
-        logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".json")
-    }
-
-    private func markdownFileURL(for date: Date) -> URL {
-        logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".md")
-    }
-
     init(logDirectory: URL? = nil, userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+        let resolvedLogDirectory: URL
         if let logDirectory {
-            self.logDirectory = logDirectory.standardizedFileURL
+            resolvedLogDirectory = logDirectory.standardizedFileURL
             self.persistsLogDirectory = false
         } else {
-            self.logDirectory = WorkMonitorPaths.resolvedLogDirectory(userDefaults: userDefaults)
+            resolvedLogDirectory = WorkMonitorPaths.resolvedLogDirectory(userDefaults: userDefaults)
             self.persistsLogDirectory = true
         }
-        ensureDirectoryExists()
-        loadToday()
-        scanForDates()
+        self.logDirectory = resolvedLogDirectory
+        self.store = ActivityLogStore(logDirectory: resolvedLogDirectory)
+
+        Task { @MainActor [weak self] in
+            await self?.prepareInitialState()
+        }
     }
 
-    private func ensureDirectoryExists() {
-        try? FileManager.default.createDirectory(
-            at: logDirectory, withIntermediateDirectories: true)
-    }
-
-    func log(activity: String) {
+    func log(activity: String) async {
         let entry = LogEntry(activity: activity)
         todayEntries.insert(entry, at: 0)
-        save()
-        scanForDates()
+        await persistTodayEntries()
+        datesWithLogs = await store.storedLogDates()
     }
 
-    func loadToday() {
-        todayEntries = loadEntries(for: Date())
+    func loadToday() async {
+        await withLoadingIndicator {
+            todayEntries = await store.loadEntries(for: Date())
+        }
     }
 
-    func hasStoredLogs() -> Bool {
-        !storedLogDates(in: logDirectory).isEmpty
+    func hasStoredLogs() async -> Bool {
+        await store.hasStoredLogs()
     }
 
-    func setLogDirectory(_ url: URL) {
-        logDirectory = url.standardizedFileURL
+    func setLogDirectory(_ url: URL) async {
+        let newDirectory = url.standardizedFileURL
+        do {
+            try await store.setLogDirectory(newDirectory)
+        } catch {
+            surfaceError(error)
+        }
+        logDirectory = newDirectory
         if persistsLogDirectory {
-            WorkMonitorPaths.setStoredLogDirectory(logDirectory, userDefaults: userDefaults)
+            WorkMonitorPaths.setStoredLogDirectory(newDirectory, userDefaults: userDefaults)
         }
-        ensureDirectoryExists()
-        reloadEntriesForCurrentDirectory()
+        await reloadEntriesForCurrentDirectory()
     }
 
-    func moveLogs(to url: URL) throws {
-        let destinationDirectory = url.standardizedFileURL
-        guard destinationDirectory != logDirectory else { return }
-
-        let filesToMove = logFileURLs(in: logDirectory)
-        try FileManager.default.createDirectory(
-            at: destinationDirectory,
-            withIntermediateDirectories: true
-        )
-
-        for fileURL in filesToMove {
-            let destinationFileURL = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
-            if FileManager.default.fileExists(atPath: destinationFileURL.path) {
-                throw LogDirectoryMoveError.destinationAlreadyContainsFile(fileURL.lastPathComponent)
-            }
+    func moveLogs(to url: URL) async throws {
+        let destinationDirectory = try await store.moveLogs(to: url)
+        logDirectory = destinationDirectory
+        if persistsLogDirectory {
+            WorkMonitorPaths.setStoredLogDirectory(destinationDirectory, userDefaults: userDefaults)
         }
-
-        for fileURL in filesToMove {
-            let destinationFileURL = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
-            try FileManager.default.moveItem(at: fileURL, to: destinationFileURL)
-        }
-
-        setLogDirectory(destinationDirectory)
+        await reloadEntriesForCurrentDirectory()
     }
 
-    func selectDate(_ date: Date) {
+    func selectDate(_ date: Date) async {
         selectedDate = date
         if !isViewingToday {
-            historicalEntries = loadEntries(for: date)
+            await withLoadingIndicator {
+                historicalEntries = await store.loadEntries(for: date)
+            }
         }
     }
 
@@ -138,13 +125,16 @@ final class ActivityLogger: ObservableObject {
         selectedDate = Date()
     }
 
-    func deleteEntry(_ entry: LogEntry) {
+    func deleteEntry(_ entry: LogEntry) async {
         if isViewingToday {
             todayEntries.removeAll { $0.id == entry.id }
-            save()
-            scanForDates()
+            await persistTodayEntries()
+            datesWithLogs = await store.storedLogDates()
         }
-        // Don't allow deleting historical entries
+    }
+
+    func dismissError() {
+        lastError = nil
     }
 
     func slackFormatted(date: Date, entries: [LogEntry], showTimestamps: Bool) -> String {
@@ -161,95 +151,57 @@ final class ActivityLogger: ObservableObject {
         return header + "\n" + lines.joined(separator: "\n")
     }
 
-    func scanForDates() {
-        datesWithLogs = storedLogDates(in: logDirectory)
+    func scanForDates() async {
+        datesWithLogs = await store.storedLogDates()
     }
 
     // MARK: - Private
 
-    private func reloadEntriesForCurrentDirectory() {
-        todayEntries = loadEntries(for: Date())
-        if isViewingToday {
-            historicalEntries = []
+    private func prepareInitialState() async {
+        do {
+            try await store.ensureLogDirectoryExists()
+        } catch {
+            surfaceError(error)
+        }
+        await reloadEntriesForCurrentDirectory()
+    }
+
+    private func reloadEntriesForCurrentDirectory() async {
+        await withLoadingIndicator {
+            todayEntries = await store.loadEntries(for: Date())
+            if isViewingToday {
+                historicalEntries = []
+            } else {
+                historicalEntries = await store.loadEntries(for: selectedDate)
+            }
+            datesWithLogs = await store.storedLogDates()
+        }
+    }
+
+    private func persistTodayEntries() async {
+        do {
+            try await store.save(entries: todayEntries, for: Date())
+        } catch {
+            surfaceError(error)
+        }
+    }
+
+    private func surfaceError(_ error: Error) {
+        if let storeError = error as? StoreError {
+            lastError = storeError
         } else {
-            historicalEntries = loadEntries(for: selectedDate)
-        }
-        scanForDates()
-    }
-
-    private func logFileURLs(in directory: URL) -> [URL] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ) else {
-            return []
-        }
-
-        return files.filter {
-            let ext = $0.pathExtension.lowercased()
-            return ext == "json" || ext == "md"
+            lastError = .saveFailed(error.localizedDescription)
         }
     }
 
-    private func storedLogDates(in directory: URL) -> [Date] {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: nil
-        ) else {
-            return []
+    private func withLoadingIndicator(_ operation: () async -> Void) async {
+        let showLoaderTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            isLoading = true
         }
-
-        return files
-            .filter { $0.pathExtension.lowercased() == "json" }
-            .filter { (try? Data(contentsOf: $0))?.count ?? 0 > 4 } // skip empty "[]" files
-            .compactMap { WorkMonitorDates.date(fromStorageDayString: $0.deletingPathExtension().lastPathComponent) }
-            .sorted(by: >)
-    }
-
-    private func loadEntries(for date: Date) -> [LogEntry] {
-        let fileURL = entriesFileURL(for: date)
-        return loadEntries(from: fileURL)
-    }
-
-    private func loadEntries(from fileURL: URL) -> [LogEntry] {
-        guard let data = try? Data(contentsOf: fileURL) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let entries = try? decoder.decode([LogEntry].self, from: data) else { return [] }
-        return entries.sorted { $0.timestamp > $1.timestamp }
-    }
-
-    private func save() {
-        // Capture now once to avoid midnight boundary issues between file writes
-        let now = Date()
-        let jsonURL = entriesFileURL(for: now)
-        let mdURL = markdownFileURL(for: now)
-
-        let sortedEntries = todayEntries.sorted { $0.timestamp < $1.timestamp }
-        if sortedEntries.isEmpty {
-            if FileManager.default.fileExists(atPath: jsonURL.path) {
-                try? FileManager.default.removeItem(at: jsonURL)
-            }
-            if FileManager.default.fileExists(atPath: mdURL.path) {
-                try? FileManager.default.removeItem(at: mdURL)
-            }
-            return
-        }
-
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(sortedEntries) else { return }
-        try? data.write(to: jsonURL, options: .atomic)
-        saveMarkdown(entries: sortedEntries, to: mdURL, date: now)
-    }
-
-    private func saveMarkdown(entries: [LogEntry], to url: URL, date: Date) {
-        var md = "# Work Log — \(WorkMonitorDates.fullDateString(for: date))\n\n"
-        for entry in entries {
-            md += "- **\(WorkMonitorDates.timeString(for: entry.timestamp))** — \(entry.activity)\n"
-        }
-
-        try? md.write(to: url, atomically: true, encoding: .utf8)
+        await operation()
+        showLoaderTask.cancel()
+        isLoading = false
     }
 }

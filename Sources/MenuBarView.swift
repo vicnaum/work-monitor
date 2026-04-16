@@ -173,8 +173,20 @@ struct MenuBarView: View {
                     .foregroundStyle(.tertiary)
             }
 
+            // Error warning
+            if let error = logger.lastError {
+                ErrorBanner(error: error) {
+                    logger.dismissError()
+                }
+            }
+
             // Calendar or entries (same space)
-            if showingCalendar {
+            if logger.isLoading {
+                Spacer()
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                Spacer()
+            } else if showingCalendar {
                 CalendarSection(logger: logger, showingCalendar: $showingCalendar)
             } else if displayedEntries.isEmpty {
                 Spacer()
@@ -193,7 +205,7 @@ struct MenuBarView: View {
                                 canDelete: logger.isViewingToday,
                                 showTimestamp: settings.showTimestamps
                             ) {
-                                logger.deleteEntry(entry)
+                                Task { await logger.deleteEntry(entry) }
                             }
                         }
                     }
@@ -367,7 +379,7 @@ struct MenuBarView: View {
     private func logActivity() {
         let trimmed = activityText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        logger.log(activity: trimmed)
+        Task { await logger.log(activity: trimmed) }
         activityText = ""
         isTextFieldFocused = true
 
@@ -420,20 +432,27 @@ struct MenuBarView: View {
         let currentDirectory = logger.logDirectory.standardizedFileURL
         guard newDirectory != currentDirectory else { return }
 
-        guard logger.hasStoredLogs() else {
-            logger.setLogDirectory(newDirectory)
+        Task { @MainActor in
+            await applyLogDirectoryChange(to: newDirectory, from: currentDirectory)
+        }
+    }
+
+    @MainActor
+    private func applyLogDirectoryChange(to newDirectory: URL, from currentDirectory: URL) async {
+        guard await logger.hasStoredLogs() else {
+            await logger.setLogDirectory(newDirectory)
             return
         }
 
         switch confirmLogMove(from: currentDirectory, to: newDirectory) {
         case .alertFirstButtonReturn:
             do {
-                try logger.moveLogs(to: newDirectory)
+                try await logger.moveLogs(to: newDirectory)
             } catch {
                 presentLogMoveError(error)
             }
         case .alertSecondButtonReturn:
-            logger.setLogDirectory(newDirectory)
+            await logger.setLogDirectory(newDirectory)
         default:
             break
         }
@@ -545,7 +564,7 @@ struct CalendarSection: View {
                             isSelected: calendar.isDate(date, inSameDayAs: logger.selectedDate),
                             isFuture: WorkMonitorDates.isFutureDay(date)
                         ) {
-                            logger.selectDate(date)
+                            Task { await logger.selectDate(date) }
                             showingCalendar = false
                         }
                     } else {
@@ -558,7 +577,7 @@ struct CalendarSection: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             displayedMonth = WorkMonitorDates.startOfMonth(for: logger.selectedDate)
-            logger.scanForDates()
+            Task { await logger.scanForDates() }
         }
     }
 }
@@ -612,6 +631,75 @@ struct DayCell: View {
 }
 
 // MARK: - Entry Row
+
+// MARK: - Error Banner
+
+struct ErrorBanner: View {
+    let error: StoreError
+    let onDismiss: () -> Void
+    @State private var showingDetails = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                Text("Save error")
+                    .font(.caption.bold())
+                    .foregroundStyle(.primary)
+                Spacer()
+                Button {
+                    showingDetails.toggle()
+                } label: {
+                    Text(showingDetails ? "Hide details" : "Details")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                Button {
+                    onDismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showingDetails {
+                Text(error.localizedDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                if let suggestion = error.recoverySuggestion {
+                    Text(suggestion)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    let text = "**Error:** \(error.localizedDescription)\n**macOS:** \(ProcessInfo.processInfo.operatingSystemVersionString)"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Label("Copy for Issue", systemImage: "doc.on.clipboard")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.yellow.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.yellow.opacity(0.3))
+                )
+        )
+    }
+}
 
 struct EntryRow: View {
     let entry: LogEntry
