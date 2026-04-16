@@ -20,24 +20,24 @@ final class ActivityLoggerTests: XCTestCase {
 
     // MARK: - Logging
 
-    func testLogCreatesEntry() {
+    func testLogCreatesEntry() async {
         XCTAssertEqual(logger.todayEntries.count, 0)
-        logger.log(activity: "Test task")
+        await logger.log(activity: "Test task")
         XCTAssertEqual(logger.todayEntries.count, 1)
         XCTAssertEqual(logger.todayEntries.first?.activity, "Test task")
     }
 
-    func testLogMultipleEntries() {
-        logger.log(activity: "First")
-        logger.log(activity: "Second")
-        logger.log(activity: "Third")
+    func testLogMultipleEntries() async {
+        await logger.log(activity: "First")
+        await logger.log(activity: "Second")
+        await logger.log(activity: "Third")
         XCTAssertEqual(logger.todayEntries.count, 3)
         // Most recent first
         XCTAssertEqual(logger.todayEntries.first?.activity, "Third")
     }
 
-    func testLogPersistsToFile() {
-        logger.log(activity: "Persistent task")
+    func testLogPersistsToFile() async {
+        await logger.log(activity: "Persistent task")
 
         let dayString = WorkMonitorDates.storageDayString(for: Date())
         let jsonFile = testDir.appendingPathComponent("\(dayString).json")
@@ -47,16 +47,17 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: mdFile.path))
     }
 
-    func testLoadTodayReadsPersistedEntries() {
-        logger.log(activity: "Task A")
-        logger.log(activity: "Task B")
+    func testLoadTodayReadsPersistedEntries() async {
+        await logger.log(activity: "Task A")
+        await logger.log(activity: "Task B")
 
         let logger2 = ActivityLogger(logDirectory: testDir)
+        await logger2.loadToday()
         XCTAssertEqual(logger2.todayEntries.count, 2)
     }
 
-    func testSetLogDirectoryReloadsEntriesFromNewFolder() throws {
-        logger.log(activity: "Original folder")
+    func testSetLogDirectoryReloadsEntriesFromNewFolder() async throws {
+        await logger.log(activity: "Original folder")
 
         let otherDir = testDir.appendingPathComponent("Other")
         try FileManager.default.createDirectory(at: otherDir, withIntermediateDirectories: true)
@@ -67,26 +68,28 @@ final class ActivityLoggerTests: XCTestCase {
         let dayString = WorkMonitorDates.storageDayString(for: Date())
         try data.write(to: otherDir.appendingPathComponent("\(dayString).json"))
 
-        logger.setLogDirectory(otherDir)
+        await logger.setLogDirectory(otherDir)
 
-        XCTAssertEqual(logger.logDirectory, otherDir.standardizedFileURL)
+        XCTAssertEqual(logger.logDirectory.standardizedFileURL.path, otherDir.standardizedFileURL.path)
         XCTAssertEqual(logger.todayEntries.count, 1)
         XCTAssertEqual(logger.todayEntries.first?.activity, "New folder")
     }
 
-    func testHasStoredLogsIsFalseForEmptyDirectory() {
-        XCTAssertFalse(logger.hasStoredLogs())
+    func testHasStoredLogsIsFalseForEmptyDirectory() async {
+        let hasStoredLogs = await logger.hasStoredLogs()
+        XCTAssertFalse(hasStoredLogs)
     }
 
-    func testHasStoredLogsIgnoresEmptyJsonFiles() throws {
+    func testHasStoredLogsIgnoresEmptyJsonFiles() async throws {
         let emptyDay = testDir.appendingPathComponent("2026-01-01.json")
         try "[]".write(to: emptyDay, atomically: true, encoding: .utf8)
 
-        XCTAssertFalse(logger.hasStoredLogs())
+        let hasStoredLogs = await logger.hasStoredLogs()
+        XCTAssertFalse(hasStoredLogs)
     }
 
-    func testMoveLogsMovesExistingFilesAndReloadsEntries() throws {
-        logger.log(activity: "Move me")
+    func testMoveLogsMovesExistingFilesAndReloadsEntries() async throws {
+        await logger.log(activity: "Move me")
 
         let dayString = WorkMonitorDates.storageDayString(for: Date())
         let sourceJSON = testDir.appendingPathComponent("\(dayString).json")
@@ -95,22 +98,22 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourceMarkdown.path))
 
         let otherDir = testDir.appendingPathComponent("Moved")
-        try logger.moveLogs(to: otherDir)
+        try await logger.moveLogs(to: otherDir)
 
-        XCTAssertEqual(logger.logDirectory, otherDir.standardizedFileURL)
+        XCTAssertEqual(logger.logDirectory.path, otherDir.standardizedFileURL.path)
         XCTAssertEqual(logger.todayEntries.first?.activity, "Move me")
         XCTAssertFalse(FileManager.default.fileExists(atPath: sourceJSON.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: sourceMarkdown.path))
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: otherDir.appendingPathComponent("\(dayString).json").path
+            atPath: otherDir.standardizedFileURL.appendingPathComponent("\(dayString).json").path
         ))
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: otherDir.appendingPathComponent("\(dayString).md").path
+            atPath: otherDir.standardizedFileURL.appendingPathComponent("\(dayString).md").path
         ))
     }
 
-    func testMoveLogsThrowsWhenDestinationAlreadyContainsSameFile() throws {
-        logger.log(activity: "Conflict")
+    func testMoveLogsThrowsWhenDestinationAlreadyContainsSameFile() async throws {
+        await logger.log(activity: "Conflict")
 
         let otherDir = testDir.appendingPathComponent("Conflict")
         try FileManager.default.createDirectory(at: otherDir, withIntermediateDirectories: true)
@@ -119,7 +122,10 @@ final class ActivityLoggerTests: XCTestCase {
         let conflictingFile = otherDir.appendingPathComponent("\(dayString).json")
         try "[]".write(to: conflictingFile, atomically: true, encoding: .utf8)
 
-        XCTAssertThrowsError(try logger.moveLogs(to: otherDir)) { error in
+        do {
+            try await logger.moveLogs(to: otherDir)
+            XCTFail("Expected move to fail")
+        } catch {
             guard case LogDirectoryMoveError.destinationAlreadyContainsFile(let filename) = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
@@ -130,24 +136,24 @@ final class ActivityLoggerTests: XCTestCase {
 
     // MARK: - Deletion
 
-    func testDeleteEntry() {
-        logger.log(activity: "Keep this")
-        logger.log(activity: "Delete this")
+    func testDeleteEntry() async {
+        await logger.log(activity: "Keep this")
+        await logger.log(activity: "Delete this")
         let toDelete = logger.todayEntries.first! // "Delete this" (most recent)
-        logger.deleteEntry(toDelete)
+        await logger.deleteEntry(toDelete)
         XCTAssertEqual(logger.todayEntries.count, 1)
         XCTAssertEqual(logger.todayEntries.first?.activity, "Keep this")
     }
 
-    func testDeleteLastEntryRemovesFiles() {
-        logger.log(activity: "Only entry")
+    func testDeleteLastEntryRemovesFiles() async {
+        await logger.log(activity: "Only entry")
         let dayString = WorkMonitorDates.storageDayString(for: Date())
         let jsonFile = testDir.appendingPathComponent("\(dayString).json")
         let mdFile = testDir.appendingPathComponent("\(dayString).md")
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: jsonFile.path))
 
-        logger.deleteEntry(logger.todayEntries.first!)
+        await logger.deleteEntry(logger.todayEntries.first!)
         XCTAssertEqual(logger.todayEntries.count, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: jsonFile.path),
                        "JSON file should be removed when all entries deleted")
@@ -155,19 +161,19 @@ final class ActivityLoggerTests: XCTestCase {
                        "Markdown file should be removed when all entries deleted")
     }
 
-    func testDeleteLastEntryRemovesFromDatesWithLogs() {
-        logger.log(activity: "Temp entry")
+    func testDeleteLastEntryRemovesFromDatesWithLogs() async {
+        await logger.log(activity: "Temp entry")
         XCTAssertFalse(logger.datesWithLogs.isEmpty)
 
-        logger.deleteEntry(logger.todayEntries.first!)
+        await logger.deleteEntry(logger.todayEntries.first!)
         XCTAssertTrue(logger.datesWithLogs.isEmpty,
                       "datesWithLogs should not include days with no entries")
     }
 
     // MARK: - Slack formatting
 
-    func testSlackFormattedWithTimestamps() {
-        logger.log(activity: "Did something")
+    func testSlackFormattedWithTimestamps() async {
+        await logger.log(activity: "Did something")
         let result = logger.slackFormatted(
             date: Date(), entries: logger.todayEntries, showTimestamps: true
         )
@@ -176,8 +182,8 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertTrue(result.contains(":"), "Should contain a time with colon")
     }
 
-    func testSlackFormattedWithoutTimestamps() {
-        logger.log(activity: "Did something")
+    func testSlackFormattedWithoutTimestamps() async {
+        await logger.log(activity: "Did something")
         let result = logger.slackFormatted(
             date: Date(), entries: logger.todayEntries, showTimestamps: false
         )
@@ -195,24 +201,24 @@ final class ActivityLoggerTests: XCTestCase {
 
     // MARK: - Date scanning
 
-    func testScanForDatesFindsLoggedDays() {
-        logger.log(activity: "Today's task")
-        logger.scanForDates()
+    func testScanForDatesFindsLoggedDays() async {
+        await logger.log(activity: "Today's task")
+        await logger.scanForDates()
         XCTAssertEqual(logger.datesWithLogs.count, 1)
     }
 
-    func testScanForDatesIgnoresEmptyFiles() throws {
+    func testScanForDatesIgnoresEmptyFiles() async throws {
         let emptyDay = testDir.appendingPathComponent("2026-01-01.json")
         try "[]".write(to: emptyDay, atomically: true, encoding: .utf8)
 
-        logger.scanForDates()
+        await logger.scanForDates()
         let hasJan1 = logger.datesWithLogs.contains {
             WorkMonitorDates.storageDayString(for: $0) == "2026-01-01"
         }
         XCTAssertFalse(hasJan1, "Empty day files should not appear in datesWithLogs")
     }
 
-    func testScanForDatesFindsMultipleDays() throws {
+    func testScanForDatesFindsMultipleDays() async throws {
         let entry = LogEntry(activity: "Old task")
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -220,8 +226,8 @@ final class ActivityLoggerTests: XCTestCase {
         let oldDay = testDir.appendingPathComponent("2026-03-10.json")
         try data.write(to: oldDay)
 
-        logger.log(activity: "Today")
-        logger.scanForDates()
+        await logger.log(activity: "Today")
+        await logger.scanForDates()
 
         XCTAssertGreaterThanOrEqual(logger.datesWithLogs.count, 2)
     }
@@ -233,16 +239,16 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertTrue(logger.isViewingToday)
     }
 
-    func testSelectHistoricalDateNotViewingToday() {
+    func testSelectHistoricalDateNotViewingToday() async {
         guard let oldDate = WorkMonitorDates.date(fromStorageDayString: "2026-01-01") else {
             XCTFail("Could not parse date")
             return
         }
-        logger.selectDate(oldDate)
+        await logger.selectDate(oldDate)
         XCTAssertFalse(logger.isViewingToday)
     }
 
-    func testDisplayedEntriesSwitchesWithSelectedDate() throws {
+    func testDisplayedEntriesSwitchesWithSelectedDate() async throws {
         let oldEntry = LogEntry(activity: "Old work")
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -250,14 +256,14 @@ final class ActivityLoggerTests: XCTestCase {
         let oldDay = testDir.appendingPathComponent("2026-03-10.json")
         try data.write(to: oldDay)
 
-        logger.log(activity: "Today's work")
+        await logger.log(activity: "Today's work")
         XCTAssertEqual(logger.displayedEntries.first?.activity, "Today's work")
 
         guard let oldDate = WorkMonitorDates.date(fromStorageDayString: "2026-03-10") else {
             XCTFail("Could not parse date")
             return
         }
-        logger.selectDate(oldDate)
+        await logger.selectDate(oldDate)
         XCTAssertEqual(logger.displayedEntries.first?.activity, "Old work")
 
         logger.selectToday()

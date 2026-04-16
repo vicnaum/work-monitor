@@ -193,7 +193,7 @@ struct MenuBarView: View {
                                 canDelete: logger.isViewingToday,
                                 showTimestamp: settings.showTimestamps
                             ) {
-                                logger.deleteEntry(entry)
+                                Task { await logger.deleteEntry(entry) }
                             }
                         }
                     }
@@ -367,7 +367,7 @@ struct MenuBarView: View {
     private func logActivity() {
         let trimmed = activityText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        logger.log(activity: trimmed)
+        Task { await logger.log(activity: trimmed) }
         activityText = ""
         isTextFieldFocused = true
 
@@ -420,20 +420,27 @@ struct MenuBarView: View {
         let currentDirectory = logger.logDirectory.standardizedFileURL
         guard newDirectory != currentDirectory else { return }
 
-        guard logger.hasStoredLogs() else {
-            logger.setLogDirectory(newDirectory)
+        Task { @MainActor in
+            await applyLogDirectoryChange(to: newDirectory, from: currentDirectory)
+        }
+    }
+
+    @MainActor
+    private func applyLogDirectoryChange(to newDirectory: URL, from currentDirectory: URL) async {
+        guard await logger.hasStoredLogs() else {
+            await logger.setLogDirectory(newDirectory)
             return
         }
 
         switch confirmLogMove(from: currentDirectory, to: newDirectory) {
         case .alertFirstButtonReturn:
             do {
-                try logger.moveLogs(to: newDirectory)
+                try await logger.moveLogs(to: newDirectory)
             } catch {
                 presentLogMoveError(error)
             }
         case .alertSecondButtonReturn:
-            logger.setLogDirectory(newDirectory)
+            await logger.setLogDirectory(newDirectory)
         default:
             break
         }
@@ -545,7 +552,7 @@ struct CalendarSection: View {
                             isSelected: calendar.isDate(date, inSameDayAs: logger.selectedDate),
                             isFuture: WorkMonitorDates.isFutureDay(date)
                         ) {
-                            logger.selectDate(date)
+                            Task { await logger.selectDate(date) }
                             showingCalendar = false
                         }
                     } else {
@@ -558,7 +565,7 @@ struct CalendarSection: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             displayedMonth = WorkMonitorDates.startOfMonth(for: logger.selectedDate)
-            logger.scanForDates()
+            Task { await logger.scanForDates() }
         }
     }
 }

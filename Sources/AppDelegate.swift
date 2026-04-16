@@ -271,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPanel(isReminder: Bool) {
         reminderFocusTask?.cancel()
         reminderFocusTask = nil
-        logger.loadToday()
+        Task { await logger.loadToday() }
         panel.center()
         NotificationCenter.default.post(name: .panelWillShow, object: nil)
 
