@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build app (arm64)
+        run: BUILD_ARCH=arm64 ./build.sh
+
+      - name: Prepare release artifact
+        run: |
+          cd WorkMonitor.app/Contents
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ inputs.version }}" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ inputs.version }}" Info.plist
+          cd ../..
+          codesign --force --sign - WorkMonitor.app
+          ditto -c -k --keepParent WorkMonitor.app WorkMonitor.app.zip
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.version }}" \
+            --title "Work Monitor ${{ inputs.version }}" \
+            --generate-notes \
+            WorkMonitor.app.zip
