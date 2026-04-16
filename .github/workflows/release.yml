@@ -43,9 +43,6 @@ jobs:
             WorkMonitor.dmg
           rm -rf "$DMG_DIR"
 
-      - name: Create zip
-        run: ditto -c -k --keepParent WorkMonitor.app WorkMonitor.app.zip
-
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,5 +50,4 @@ jobs:
           gh release create "${{ inputs.version }}" \
             --title "Work Monitor ${{ inputs.version }}" \
             --generate-notes \
-            WorkMonitor.dmg \
-            WorkMonitor.app.zip
+            WorkMonitor.dmg
