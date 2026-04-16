@@ -409,7 +409,56 @@ struct MenuBarView: View {
         panel.directoryURL = logger.logDirectory
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        logger.setLogDirectory(url)
+
+        let newDirectory = url.standardizedFileURL
+        let currentDirectory = logger.logDirectory.standardizedFileURL
+        guard newDirectory != currentDirectory else { return }
+
+        guard logger.hasStoredLogs() else {
+            logger.setLogDirectory(newDirectory)
+            return
+        }
+
+        switch confirmLogMove(from: currentDirectory, to: newDirectory) {
+        case .alertFirstButtonReturn:
+            do {
+                try logger.moveLogs(to: newDirectory)
+            } catch {
+                presentLogMoveError(error)
+            }
+        case .alertSecondButtonReturn:
+            logger.setLogDirectory(newDirectory)
+        default:
+            break
+        }
+    }
+
+    private func confirmLogMove(from currentDirectory: URL, to newDirectory: URL) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.messageText = "Move existing logs to the new folder?"
+        alert.informativeText = """
+        Current folder: \(WorkMonitorPaths.displayPath(for: currentDirectory))
+        New folder: \(WorkMonitorPaths.displayPath(for: newDirectory))
+
+        Move existing JSON and Markdown logs, or only use the new folder for future logs.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Move Logs")
+        alert.addButton(withTitle: "Use New Folder Only")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal()
+    }
+
+    private func presentLogMoveError(_ error: Error) {
+        let localizedError = error as? LocalizedError
+        let alert = NSAlert()
+        alert.messageText = "Couldn’t move logs"
+        alert.informativeText = [error.localizedDescription, localizedError?.recoverySuggestion]
+            .compactMap { $0 }
+            .joined(separator: "\n\n")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 

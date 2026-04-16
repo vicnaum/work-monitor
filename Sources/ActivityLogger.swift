@@ -13,6 +13,21 @@ struct LogEntry: Codable, Identifiable, Sendable {
     }
 }
 
+enum LogDirectoryMoveError: LocalizedError {
+    case destinationAlreadyContainsFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .destinationAlreadyContainsFile(let filename):
+            return "The destination folder already contains \(filename)."
+        }
+    }
+
+    var recoverySuggestion: String? {
+        "Choose a different folder, or remove the conflicting file and try again."
+    }
+}
+
 @MainActor
 final class ActivityLogger: ObservableObject {
     @Published var todayEntries: [LogEntry] = []
@@ -74,6 +89,10 @@ final class ActivityLogger: ObservableObject {
         todayEntries = loadEntries(for: Date())
     }
 
+    func hasStoredLogs() -> Bool {
+        !logFileURLs(in: logDirectory).isEmpty
+    }
+
     func setLogDirectory(_ url: URL) {
         logDirectory = url.standardizedFileURL
         if persistsLogDirectory {
@@ -81,6 +100,31 @@ final class ActivityLogger: ObservableObject {
         }
         ensureDirectoryExists()
         reloadEntriesForCurrentDirectory()
+    }
+
+    func moveLogs(to url: URL) throws {
+        let destinationDirectory = url.standardizedFileURL
+        guard destinationDirectory != logDirectory else { return }
+
+        let filesToMove = logFileURLs(in: logDirectory)
+        try FileManager.default.createDirectory(
+            at: destinationDirectory,
+            withIntermediateDirectories: true
+        )
+
+        for fileURL in filesToMove {
+            let destinationFileURL = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
+            if FileManager.default.fileExists(atPath: destinationFileURL.path) {
+                throw LogDirectoryMoveError.destinationAlreadyContainsFile(fileURL.lastPathComponent)
+            }
+        }
+
+        for fileURL in filesToMove {
+            let destinationFileURL = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
+            try FileManager.default.moveItem(at: fileURL, to: destinationFileURL)
+        }
+
+        setLogDirectory(destinationDirectory)
     }
 
     func selectDate(_ date: Date) {
@@ -141,6 +185,20 @@ final class ActivityLogger: ObservableObject {
             historicalEntries = loadEntries(for: selectedDate)
         }
         scanForDates()
+    }
+
+    private func logFileURLs(in directory: URL) -> [URL] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+
+        return files.filter {
+            let ext = $0.pathExtension.lowercased()
+            return ext == "json" || ext == "md"
+        }
     }
 
     private func loadEntries(for date: Date) -> [LogEntry] {

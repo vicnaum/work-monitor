@@ -74,6 +74,49 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertEqual(logger.todayEntries.first?.activity, "New folder")
     }
 
+    func testMoveLogsMovesExistingFilesAndReloadsEntries() throws {
+        logger.log(activity: "Move me")
+
+        let dayString = WorkMonitorDates.storageDayString(for: Date())
+        let sourceJSON = testDir.appendingPathComponent("\(dayString).json")
+        let sourceMarkdown = testDir.appendingPathComponent("\(dayString).md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceJSON.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceMarkdown.path))
+
+        let otherDir = testDir.appendingPathComponent("Moved")
+        try logger.moveLogs(to: otherDir)
+
+        XCTAssertEqual(logger.logDirectory, otherDir.standardizedFileURL)
+        XCTAssertEqual(logger.todayEntries.first?.activity, "Move me")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sourceJSON.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sourceMarkdown.path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: otherDir.appendingPathComponent("\(dayString).json").path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: otherDir.appendingPathComponent("\(dayString).md").path
+        ))
+    }
+
+    func testMoveLogsThrowsWhenDestinationAlreadyContainsSameFile() throws {
+        logger.log(activity: "Conflict")
+
+        let otherDir = testDir.appendingPathComponent("Conflict")
+        try FileManager.default.createDirectory(at: otherDir, withIntermediateDirectories: true)
+
+        let dayString = WorkMonitorDates.storageDayString(for: Date())
+        let conflictingFile = otherDir.appendingPathComponent("\(dayString).json")
+        try "[]".write(to: conflictingFile, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try logger.moveLogs(to: otherDir)) { error in
+            guard case LogDirectoryMoveError.destinationAlreadyContainsFile(let filename) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(filename, "\(dayString).json")
+        }
+        XCTAssertEqual(logger.logDirectory, testDir.standardizedFileURL)
+    }
+
     // MARK: - Deletion
 
     func testDeleteEntry() {
