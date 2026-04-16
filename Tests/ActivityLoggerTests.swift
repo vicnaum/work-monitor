@@ -57,15 +57,17 @@ final class ActivityLoggerTests: XCTestCase {
     }
 
     func testLoadTodaySurfacesDecodeErrorAndPreservesCorruptFile() async throws {
+        // Ensure the logger's init Task has completed before we corrupt the file
+        await logger.loadToday()
+
         let dayString = WorkMonitorDates.storageDayString(for: Date())
         let jsonFile = testDir.appendingPathComponent("\(dayString).json")
         try "{not valid json".write(to: jsonFile, atomically: true, encoding: .utf8)
 
-        let logger2 = ActivityLogger(logDirectory: testDir)
-        await logger2.loadToday()
+        await logger.loadToday()
 
-        guard case .decodeFailed(let filename, let preservedAs, _) = logger2.lastError else {
-            return XCTFail("Expected a decode error, got \(String(describing: logger2.lastError))")
+        guard case .decodeFailed(let filename, let preservedAs, _) = logger.lastError else {
+            return XCTFail("Expected a decode error, got \(String(describing: logger.lastError))")
         }
 
         XCTAssertEqual(filename, "\(dayString).json")

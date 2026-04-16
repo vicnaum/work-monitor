@@ -133,6 +133,9 @@ actor ActivityLogStore {
             blockedWriteDayKeys.remove(dayKey)
             return entries.sorted { $0.timestamp > $1.timestamp }
         } catch {
+            // Quarantine renames the corrupt file, briefly leaving the original
+            // filename absent. Actor serialization guarantees no concurrent call
+            // to loadEntries or save can observe this intermediate state.
             let preservedJSONURL: URL
             do {
                 preservedJSONURL = try quarantineUnreadableLog(for: date)
@@ -196,8 +199,10 @@ actor ActivityLogStore {
                 detail: error.localizedDescription
             )
         }
-        try saveMarkdown(entries: sortedEntries, to: markdownURL, date: date)
+        // JSON is the source of truth. A markdown-only failure should not
+        // block future writes — surface it but keep going.
         blockedWriteDayKeys.remove(dayKey)
+        try saveMarkdown(entries: sortedEntries, to: markdownURL, date: date)
     }
 
     func storedLogDates() throws -> [Date] {
@@ -263,6 +268,9 @@ actor ActivityLogStore {
         WorkMonitorDates.storageDayString(for: date)
     }
 
+    /// Returns the file size in bytes, or 5 if the size can't be read.
+    /// Returning 5 (above the empty-file threshold of 4) intentionally includes
+    /// unreadable files so that `loadEntries` gets a chance to surface the real error.
     private func fileSize(for url: URL) -> Int {
         do {
             return try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -308,11 +316,12 @@ actor ActivityLogStore {
             .appendingPathComponent("\(baseName)\(suffix).\(fileExtension)")
     }
 
+    /// Produces a short suffix like `T143012-A1B2C3D4` (time + UUID fragment).
+    /// The day is already in the base filename, so we only need enough to
+    /// disambiguate multiple quarantines on the same day.
     private func quarantineSuffix() -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let timestamp = formatter.string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
-        return "\(timestamp)-\(UUID().uuidString.prefix(8))"
+        let f = DateFormatter()
+        f.dateFormat = "HHmmss"
+        return "T\(f.string(from: Date()))-\(UUID().uuidString.prefix(8))"
     }
 }
