@@ -90,7 +90,7 @@ final class ActivityLogger: ObservableObject {
     }
 
     func hasStoredLogs() -> Bool {
-        !logFileURLs(in: logDirectory).isEmpty
+        !storedLogDates(in: logDirectory).isEmpty
     }
 
     func setLogDirectory(_ url: URL) {
@@ -162,17 +162,7 @@ final class ActivityLogger: ObservableObject {
     }
 
     func scanForDates() {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: logDirectory, includingPropertiesForKeys: nil
-        ) else {
-            datesWithLogs = []
-            return
-        }
-        datesWithLogs = files
-            .filter { $0.pathExtension == "json" }
-            .filter { (try? Data(contentsOf: $0))?.count ?? 0 > 4 } // skip empty "[]" files
-            .compactMap { WorkMonitorDates.date(fromStorageDayString: $0.deletingPathExtension().lastPathComponent) }
-            .sorted(by: >)
+        datesWithLogs = storedLogDates(in: logDirectory)
     }
 
     // MARK: - Private
@@ -199,6 +189,21 @@ final class ActivityLogger: ObservableObject {
             let ext = $0.pathExtension.lowercased()
             return ext == "json" || ext == "md"
         }
+    }
+
+    private func storedLogDates(in directory: URL) -> [Date] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+
+        return files
+            .filter { $0.pathExtension.lowercased() == "json" }
+            .filter { (try? Data(contentsOf: $0))?.count ?? 0 > 4 } // skip empty "[]" files
+            .compactMap { WorkMonitorDates.date(fromStorageDayString: $0.deletingPathExtension().lastPathComponent) }
+            .sorted(by: >)
     }
 
     private func loadEntries(for date: Date) -> [LogEntry] {

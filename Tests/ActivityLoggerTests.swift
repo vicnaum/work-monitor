@@ -74,6 +74,17 @@ final class ActivityLoggerTests: XCTestCase {
         XCTAssertEqual(logger.todayEntries.first?.activity, "New folder")
     }
 
+    func testHasStoredLogsIsFalseForEmptyDirectory() {
+        XCTAssertFalse(logger.hasStoredLogs())
+    }
+
+    func testHasStoredLogsIgnoresEmptyJsonFiles() throws {
+        let emptyDay = testDir.appendingPathComponent("2026-01-01.json")
+        try "[]".write(to: emptyDay, atomically: true, encoding: .utf8)
+
+        XCTAssertFalse(logger.hasStoredLogs())
+    }
+
     func testMoveLogsMovesExistingFilesAndReloadsEntries() throws {
         logger.log(activity: "Move me")
 
