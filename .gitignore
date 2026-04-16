@@ -4,3 +4,5 @@ AppIcon.iconset/
 AppIcon.icns
 icon_1024.png
 .DS_Store
+.build/
+.swiftpm/

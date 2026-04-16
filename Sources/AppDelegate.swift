@@ -18,6 +18,7 @@ final class FloatingPanel: NSPanel {
         }
     }
 
+    // Hide instead of destroy — we reuse the panel across show/hide cycles.
     override func close() {
         if let onDismiss {
             onDismiss()

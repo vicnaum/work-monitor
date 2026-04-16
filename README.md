@@ -48,6 +48,14 @@ Since the app is not notarized, macOS will show a warning on first launch. To by
 - **Escape** -- dismiss the panel
 - Bottom bar icons: toggle timestamps, sound, reminders, adjust interval
 
+## Tests
+
+```bash
+swift test
+```
+
+35 tests covering date formatting, calendar math, entry persistence, deletion cleanup, Slack formatting, and date navigation.
+
 ## Logs
 
 Stored in `~/.work-monitor/logs/` as daily files:

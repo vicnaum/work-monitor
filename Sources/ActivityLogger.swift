@@ -33,10 +33,7 @@ final class ActivityLogger: ObservableObject {
         WorkMonitorDates.mediumDateString(for: selectedDate)
     }
 
-    private var logDirectory: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".work-monitor/logs")
-    }
+    let logDirectory: URL
 
     private func entriesFileURL(for date: Date) -> URL {
         logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".json")
@@ -54,7 +51,10 @@ final class ActivityLogger: ObservableObject {
         markdownFileURL(for: Date())
     }
 
-    init() {
+    init(logDirectory: URL? = nil) {
+        self.logDirectory = logDirectory
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".work-monitor/logs")
         ensureDirectoryExists()
         loadToday()
         scanForDates()
@@ -119,7 +119,7 @@ final class ActivityLogger: ObservableObject {
         }
         datesWithLogs = files
             .filter { $0.pathExtension == "json" }
-            .filter { !loadEntries(from: $0).isEmpty }
+            .filter { (try? Data(contentsOf: $0))?.count ?? 0 > 4 } // skip empty "[]" files
             .compactMap { WorkMonitorDates.date(fromStorageDayString: $0.deletingPathExtension().lastPathComponent) }
             .sorted(by: >)
     }
@@ -140,13 +140,18 @@ final class ActivityLogger: ObservableObject {
     }
 
     private func save() {
+        // Capture now once to avoid midnight boundary issues between file writes
+        let now = Date()
+        let jsonURL = entriesFileURL(for: now)
+        let mdURL = markdownFileURL(for: now)
+
         let sortedEntries = todayEntries.sorted { $0.timestamp < $1.timestamp }
         if sortedEntries.isEmpty {
-            if FileManager.default.fileExists(atPath: todayFileURL.path) {
-                try? FileManager.default.removeItem(at: todayFileURL)
+            if FileManager.default.fileExists(atPath: jsonURL.path) {
+                try? FileManager.default.removeItem(at: jsonURL)
             }
-            if FileManager.default.fileExists(atPath: todayMarkdownURL.path) {
-                try? FileManager.default.removeItem(at: todayMarkdownURL)
+            if FileManager.default.fileExists(atPath: mdURL.path) {
+                try? FileManager.default.removeItem(at: mdURL)
             }
             return
         }
@@ -155,16 +160,16 @@ final class ActivityLogger: ObservableObject {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(sortedEntries) else { return }
-        try? data.write(to: todayFileURL, options: .atomic)
-        saveMarkdown(entries: sortedEntries)
+        try? data.write(to: jsonURL, options: .atomic)
+        saveMarkdown(entries: sortedEntries, to: mdURL, date: now)
     }
 
-    private func saveMarkdown(entries: [LogEntry]) {
-        var md = "# Work Log — \(WorkMonitorDates.fullDateString(for: Date()))\n\n"
+    private func saveMarkdown(entries: [LogEntry], to url: URL, date: Date) {
+        var md = "# Work Log — \(WorkMonitorDates.fullDateString(for: date))\n\n"
         for entry in entries {
             md += "- **\(WorkMonitorDates.timeString(for: entry.timestamp))** — \(entry.activity)\n"
         }
 
-        try? md.write(to: todayMarkdownURL, atomically: true, encoding: .utf8)
+        try? md.write(to: url, atomically: true, encoding: .utf8)
     }
 }
