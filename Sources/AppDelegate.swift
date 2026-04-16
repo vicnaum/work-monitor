@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsCancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupMainMenu()
         setupStatusItem()
         setupPanel()
         startReminderTimer()
@@ -79,9 +80,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.$remindersEnabled.sink { [weak self] _ in
             Task { @MainActor in self?.startReminderTimer() }
         }.store(in: &settingsCancellables)
+
+        Task { @MainActor [weak self] in
+            self?.showInitialPanelIfNeeded()
+        }
     }
 
     // MARK: - Setup
+
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+
+        let quitItem = NSMenuItem(
+            title: "Quit Work Monitor",
+            action: #selector(quitApp),
+            keyEquivalent: "q"
+        )
+        quitItem.target = self
+        appMenu.addItem(quitItem)
+
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+        NSApp.mainMenu = mainMenu
+    }
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -268,6 +291,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
             NotificationCenter.default.post(name: .panelShowedManually, object: nil)
         }
+    }
+
+    private func showInitialPanelIfNeeded() {
+        guard AppLaunchBehavior.shouldShowInitialPanel(
+            launchedAtLogin: AppLaunchBehavior.wasLaunchedAtLogin()
+        ) else { return }
+
+        showPanel(isReminder: false)
+        AppLaunchBehavior.markInitialPanelShown()
     }
 
     private func hidePanel() {

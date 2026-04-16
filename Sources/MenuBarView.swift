@@ -1,6 +1,12 @@
 import SwiftUI
 
 struct MenuBarView: View {
+    private static let submitKeys: Set<KeyEquivalent> = [
+        .return,
+        .init("\r"),
+        .init("\u{3}")
+    ]
+
     @ObservedObject var logger: ActivityLogger
     @ObservedObject var settings: AppSettings
     let dismissPanel: () -> Void
@@ -109,7 +115,7 @@ struct MenuBarView: View {
                             .stroke(Color.secondary.opacity(0.3))
                     )
                     .focused($isTextFieldFocused)
-                    .onKeyPress(keys: [.return, .init("\r")], phases: .down) { _ in
+                    .onKeyPress(keys: Self.submitKeys, phases: .down) { _ in
                         logActivity()
                         return .handled
                     }
