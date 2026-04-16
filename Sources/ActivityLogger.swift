@@ -13,13 +13,31 @@ struct LogEntry: Codable, Identifiable, Sendable {
     }
 }
 
+enum LogDirectoryMoveError: LocalizedError {
+    case destinationAlreadyContainsFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .destinationAlreadyContainsFile(let filename):
+            return "The destination folder already contains \(filename)."
+        }
+    }
+
+    var recoverySuggestion: String? {
+        "Choose a different folder, or remove the conflicting file and try again."
+    }
+}
+
 @MainActor
 final class ActivityLogger: ObservableObject {
     @Published var todayEntries: [LogEntry] = []
     @Published var selectedDate = Date()
     @Published var historicalEntries: [LogEntry] = []
     @Published var datesWithLogs: [Date] = []
+    @Published private(set) var logDirectory: URL
     let appLaunchTime = Date()
+    private let persistsLogDirectory: Bool
+    private let userDefaults: UserDefaults
 
     var isViewingToday: Bool {
         WorkMonitorDates.uiCalendar.isDateInToday(selectedDate)
@@ -33,8 +51,6 @@ final class ActivityLogger: ObservableObject {
         WorkMonitorDates.mediumDateString(for: selectedDate)
     }
 
-    let logDirectory: URL
-
     private func entriesFileURL(for date: Date) -> URL {
         logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".json")
     }
@@ -43,18 +59,15 @@ final class ActivityLogger: ObservableObject {
         logDirectory.appendingPathComponent(WorkMonitorDates.storageDayString(for: date) + ".md")
     }
 
-    private var todayFileURL: URL {
-        entriesFileURL(for: Date())
-    }
-
-    private var todayMarkdownURL: URL {
-        markdownFileURL(for: Date())
-    }
-
-    init(logDirectory: URL? = nil) {
-        self.logDirectory = logDirectory
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".work-monitor/logs")
+    init(logDirectory: URL? = nil, userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        if let logDirectory {
+            self.logDirectory = logDirectory.standardizedFileURL
+            self.persistsLogDirectory = false
+        } else {
+            self.logDirectory = WorkMonitorPaths.resolvedLogDirectory(userDefaults: userDefaults)
+            self.persistsLogDirectory = true
+        }
         ensureDirectoryExists()
         loadToday()
         scanForDates()
@@ -74,6 +87,44 @@ final class ActivityLogger: ObservableObject {
 
     func loadToday() {
         todayEntries = loadEntries(for: Date())
+    }
+
+    func hasStoredLogs() -> Bool {
+        !storedLogDates(in: logDirectory).isEmpty
+    }
+
+    func setLogDirectory(_ url: URL) {
+        logDirectory = url.standardizedFileURL
+        if persistsLogDirectory {
+            WorkMonitorPaths.setStoredLogDirectory(logDirectory, userDefaults: userDefaults)
+        }
+        ensureDirectoryExists()
+        reloadEntriesForCurrentDirectory()
+    }
+
+    func moveLogs(to url: URL) throws {
+        let destinationDirectory = url.standardizedFileURL
+        guard destinationDirectory != logDirectory else { return }
+
+        let filesToMove = logFileURLs(in: logDirectory)
+        try FileManager.default.createDirectory(
+            at: destinationDirectory,
+            withIntermediateDirectories: true
+        )
+
+        for fileURL in filesToMove {
+            let destinationFileURL = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
+            if FileManager.default.fileExists(atPath: destinationFileURL.path) {
+                throw LogDirectoryMoveError.destinationAlreadyContainsFile(fileURL.lastPathComponent)
+            }
+        }
+
+        for fileURL in filesToMove {
+            let destinationFileURL = destinationDirectory.appendingPathComponent(fileURL.lastPathComponent)
+            try FileManager.default.moveItem(at: fileURL, to: destinationFileURL)
+        }
+
+        setLogDirectory(destinationDirectory)
     }
 
     func selectDate(_ date: Date) {
@@ -111,20 +162,49 @@ final class ActivityLogger: ObservableObject {
     }
 
     func scanForDates() {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: logDirectory, includingPropertiesForKeys: nil
-        ) else {
-            datesWithLogs = []
-            return
+        datesWithLogs = storedLogDates(in: logDirectory)
+    }
+
+    // MARK: - Private
+
+    private func reloadEntriesForCurrentDirectory() {
+        todayEntries = loadEntries(for: Date())
+        if isViewingToday {
+            historicalEntries = []
+        } else {
+            historicalEntries = loadEntries(for: selectedDate)
         }
-        datesWithLogs = files
-            .filter { $0.pathExtension == "json" }
+        scanForDates()
+    }
+
+    private func logFileURLs(in directory: URL) -> [URL] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+
+        return files.filter {
+            let ext = $0.pathExtension.lowercased()
+            return ext == "json" || ext == "md"
+        }
+    }
+
+    private func storedLogDates(in directory: URL) -> [Date] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return []
+        }
+
+        return files
+            .filter { $0.pathExtension.lowercased() == "json" }
             .filter { (try? Data(contentsOf: $0))?.count ?? 0 > 4 } // skip empty "[]" files
             .compactMap { WorkMonitorDates.date(fromStorageDayString: $0.deletingPathExtension().lastPathComponent) }
             .sorted(by: >)
     }
-
-    // MARK: - Private
 
     private func loadEntries(for date: Date) -> [LogEntry] {
         let fileURL = entriesFileURL(for: date)
