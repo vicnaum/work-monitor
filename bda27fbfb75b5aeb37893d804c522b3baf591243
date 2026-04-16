@@ -1,0 +1,37 @@
+Sources/WorkMonitorDates.swift
+  7f83aac34ceb0762 6-7,23-37,39-40,42-43,47-48,51-52,72-73,96
+Sources/AppDelegate.swift
+  7f83aac34ceb0762 21
+Sources/ActivityLogger.swift
+  7f83aac34ceb0762 36,54-57,122,143-147,150-151,153-154,163-164,167-168,173
+Tests/WorkMonitorDatesTests.swift
+  7f83aac34ceb0762 1-179
+README.md
+  7f83aac34ceb0762 51-58
+Package.swift
+  7f83aac34ceb0762 1-23
+Tests/ActivityLoggerTests.swift
+  7f83aac34ceb0762 1-193
+.gitignore
+  7f83aac34ceb0762 7-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "bda27fbfb75b5aeb37893d804c522b3baf591243",
+  "prompts": {
+    "7f83aac34ceb0762": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d363d6c-fbb0-4509-aaf9-9a2747aa7560",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "vicnaum",
+      "messages": [],
+      "total_additions": 527,
+      "total_deletions": 91,
+      "accepted_lines": 473,
+      "overriden_lines": 0
+    }
+  }
+}
