@@ -128,7 +128,9 @@ final class ActivityLogger: ObservableObject {
 
     func selectDate(_ date: Date) async {
         selectedDate = date
-        if !isViewingToday {
+        if isViewingToday {
+            await loadToday()
+        } else {
             await withLoadingIndicator {
                 do {
                     historicalEntries = try await store.loadEntries(for: date)
@@ -140,8 +142,9 @@ final class ActivityLogger: ObservableObject {
         }
     }
 
-    func selectToday() {
+    func selectToday() async {
         selectedDate = Date()
+        await loadToday()
     }
 
     func deleteEntry(_ entry: LogEntry) async {

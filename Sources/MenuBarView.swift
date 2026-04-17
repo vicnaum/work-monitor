@@ -132,7 +132,7 @@ struct MenuBarView: View {
                 // Viewing historical date
                 HStack {
                     Button {
-                        logger.selectToday()
+                        Task { await logger.selectToday() }
                     } label: {
                         Label("Back to Today", systemImage: "arrow.left")
                     }
@@ -332,7 +332,7 @@ struct MenuBarView: View {
         .onReceive(NotificationCenter.default.publisher(for: .panelWillShow)) { _ in
             motivationalText = Self.randomMotivation()
             motivationalColor = Self.randomBrightColor()
-            logger.selectToday()
+            Task { await logger.selectToday() }
             startClock()
         }
         .onReceive(NotificationCenter.default.publisher(for: .panelShowedByReminder)) { _ in

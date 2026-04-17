@@ -256,8 +256,8 @@ final class ActivityLoggerTests: XCTestCase {
 
     // MARK: - Date selection
 
-    func testSelectTodayIsViewingToday() {
-        logger.selectToday()
+    func testSelectTodayIsViewingToday() async {
+        await logger.selectToday()
         XCTAssertTrue(logger.isViewingToday)
     }
 
@@ -288,7 +288,7 @@ final class ActivityLoggerTests: XCTestCase {
         await logger.selectDate(oldDate)
         XCTAssertEqual(logger.displayedEntries.first?.activity, "Old work")
 
-        logger.selectToday()
+        await logger.selectToday()
         XCTAssertEqual(logger.displayedEntries.first?.activity, "Today's work")
     }
 }
